@@ -3,9 +3,6 @@
     <header class="topbar">
       <p class="tag">RESEARCH DEMO</p>
       <h1>対話型キャラクター生成Demo</h1>
-      <p class="subtitle">
-        あなたの言葉をもとに、かっこいい女性キャラクターを対話しながら生成します。
-      </p>
     </header>
 
     <main class="layout">
@@ -117,6 +114,113 @@
       </section>
     </main>
 
+    <!-- 问卷区域 -->
+    <section class="survey-section">
+      <div class="survey-card">
+        <div class="survey-header">
+          <p class="tag">QUESTIONNAIRE</p>
+          <h2>体験後アンケート</h2>
+          <p>
+            生成体験が終わったら、以下の質問に回答してください。
+          </p>
+        </div>
+
+        <div class="survey-grid">
+          <!-- Q1 -->
+          <div class="survey-item full">
+            <h3>Q1 画像生成AIでキャラクターを作った経験はありますか？</h3>
+
+            <div class="choice-list">
+              <label
+                v-for="option in experienceOptions"
+                :key="option.value"
+                class="choice-option"
+                :class="{ selected: survey.experience === option.value }"
+              >
+                <input
+                  type="radio"
+                  name="experience"
+                  :value="option.value"
+                  v-model.number="survey.experience"
+                />
+                <span class="choice-number">{{ option.value }}</span>
+                <span>{{ option.label }}</span>
+              </label>
+            </div>
+          </div>
+
+          <!-- Q2-Q6 -->
+          <div
+            v-for="question in ratingQuestions"
+            :key="question.key"
+            class="survey-item"
+          >
+            <h3>{{ question.title }}</h3>
+            <p>{{ question.description }}</p>
+            <div class="rating-block">
+              <div class="rating-row">
+                <label
+                  v-for="n in 5"
+                  :key="n"
+                  class="rating-option"
+                  :class="{ selected: survey[question.key] === n }"
+                >
+                  <input
+                    type="radio"
+                    :name="question.key"
+                    :value="n"
+                    v-model.number="survey[question.key]"
+                  />
+                  <span>{{ n }}</span>
+                </label>
+              </div>
+            </div>
+            <div class="rating-labels">
+              <span>低い</span>
+              <span>高い</span>
+            </div>
+          </div>
+
+          <!-- Q7-Q9 开放题 -->
+          <div class="survey-item full">
+            <h3>Q7 使っていて、不便だと感じた点や問題はありましたか？</h3>
+            <textarea
+              v-model="survey.problem"
+              class="survey-textarea"
+              placeholder="操作中に困った点や、分かりにくかった点があれば書いてください。"
+            ></textarea>
+          </div>
+
+          <div class="survey-item full">
+            <h3>Q8 改善するとしたら、どのような機能があると作りやすいと思いますか？</h3>
+            <textarea
+              v-model="survey.suggestion"
+              class="survey-textarea"
+              placeholder="追加してほしい機能や、改善してほしい点があれば書いてください。"
+            ></textarea>
+          </div>
+
+          <div class="survey-item full">
+            <h3>Q9 このような生成方法は、どのような場面に向いていると思いますか？</h3>
+            <textarea
+              v-model="survey.scene"
+              class="survey-textarea"
+              placeholder="このシステムが役に立ちそうな場面や使い方について、自由に書いてください。"
+            ></textarea>
+          </div>
+        </div>
+
+        <div class="survey-actions">
+          <button @click="downloadSurveyCsv">
+            回答をCSVで保存
+          </button>
+          <button class="secondary" @click="resetSurvey">
+            アンケートをリセット
+          </button>
+        </div>
+      </div>
+    </section>
+
     <!-- 图片放大弹窗 -->
     <div v-if="showImageModal" class="image-modal" @click="closeImageModal">
       <div class="modal-content" @click.stop>
@@ -154,6 +258,69 @@ const messages = ref([
       'こんにちは。あなたが思う「かっこいい女性キャラクター」について教えてください。まだ曖昧でも大丈夫です。'
   }
 ])
+
+const experienceOptions = [
+  {
+    value: 1,
+    label: 'まったく使ったことがない'
+  },
+  {
+    value: 2,
+    label: '一度だけ試したことがある'
+  },
+  {
+    value: 3,
+    label: '数回使ったことがある'
+  },
+  {
+    value: 4,
+    label: '以前は使っていたが、最近はあまり使っていない'
+  },
+  {
+    value: 5,
+    label: 'よく使っていて、現在も継続的に使用している'
+  }
+]
+
+const ratingQuestions = [
+  {
+    key: 'dialogue',
+    title: 'Q2 対話だけでキャラクターのイメージを伝えることは簡単でしたか？',
+    description: '言葉だけで自分のイメージを伝えやすかったかを評価してください。'
+  },
+  {
+    key: 'match',
+    title: 'Q3 キャラクターの変化を自分でコントロールできると感じましたか？',
+    description: '自分の指示によってキャラクターを調整できた感覚があったかを評価してください。'
+  },
+  {
+    key: 'consistency',
+    title: 'Q4 複数回修正した後も、同じキャラクターとして維持されていましたか？',
+    description: '修正を重ねても、キャラクターの一貫性が保たれていたかを評価してください。'
+  },
+  {
+    key: 'control',
+    title: 'Q5 生成されたキャラクターは、自分のイメージに合っていましたか？',
+    description: '生成結果が自分の想像に近かったかを評価してください。'
+  },
+  {
+    key: 'retry',
+    title: 'Q6 機会があれば、もう一度キャラクターを作ってみたいですか？',
+    description: '今後もこのような方法でキャラクターを作ってみたいかを評価してください。'
+  }
+]
+
+const survey = ref({
+  experience: '',
+  dialogue: '',
+  match: '',
+  consistency: '',
+  control: '',
+  retry: '',
+  problem: '',
+  suggestion: '',
+  scene: ''
+})
 
 async function sendMessage() {
   const text = inputText.value.trim()
@@ -277,6 +444,83 @@ async function resetCharacter() {
   }
 }
 
+function resetSurvey() {
+  survey.value = {
+    experience: '',
+    dialogue: '',
+    match: '',
+    consistency: '',
+    control: '',
+    retry: '',
+    problem: '',
+    suggestion: '',
+    scene: ''
+  }
+}
+
+function escapeCsv(value) {
+  const text = String(value ?? '')
+  return `"${text.replace(/"/g, '""')}"`
+}
+
+function downloadSurveyCsv() {
+  const now = new Date().toISOString()
+
+  const latestUserMessages = messages.value
+    .filter((message) => message.role === 'user')
+    .map((message) => message.content)
+    .join(' / ')
+
+  const headers = [
+    'timestamp',
+    'generation_count',
+    'experience',
+    'dialogue',
+    'match',
+    'consistency',
+    'control',
+    'retry',
+    'problem',
+    'suggestion',
+    'scene',
+    'user_prompts'
+  ]
+
+  const row = [
+    now,
+    generationCount.value,
+    survey.value.experience,
+    survey.value.dialogue,
+    survey.value.match,
+    survey.value.consistency,
+    survey.value.control,
+    survey.value.retry,
+    survey.value.problem,
+    survey.value.suggestion,
+    survey.value.scene,
+    latestUserMessages
+  ]
+
+  const csv =
+    '\uFEFF' +
+    headers.map(escapeCsv).join(',') +
+    '\n' +
+    row.map(escapeCsv).join(',')
+
+  const blob = new Blob([csv], {
+    type: 'text/csv;charset=utf-8;'
+  })
+
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = `character_demo_survey_${Date.now()}.csv`
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+}
+
 async function scrollToBottom() {
   await nextTick()
 
@@ -295,7 +539,7 @@ async function scrollToBottom() {
     radial-gradient(circle at bottom right, rgba(255, 90, 150, 0.14), transparent 28%),
     #0d0d12;
   color: #f5f5f7;
-  padding: 24px 40px;
+  padding: 24px 40px 56px;
   box-sizing: border-box;
   overflow-x: hidden;
 }
@@ -342,7 +586,8 @@ h1 {
 }
 
 .chat-panel,
-.preview-card {
+.preview-card,
+.survey-card {
   background: rgba(255, 255, 255, 0.075);
   border: 1px solid rgba(255, 255, 255, 0.13);
   backdrop-filter: blur(18px);
@@ -485,9 +730,9 @@ textarea::placeholder {
 }
 
 .image-area {
-  flex: 1;
-  min-height: 430px;
-  max-height: 640px;
+  width: min(100%, 520px);
+  aspect-ratio: 2 / 3;
+  margin: 0 auto;
   border-radius: 24px;
   background:
     linear-gradient(145deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02)),
@@ -501,8 +746,8 @@ textarea::placeholder {
 .image-area img {
   width: 100%;
   height: 100%;
-  object-fit: contain;
-  padding: 8px;
+  object-fit: cover;
+  padding: 0;
   box-sizing: border-box;
 }
 
@@ -550,7 +795,9 @@ textarea::placeholder {
   margin-top: 10px;
 }
 
-.image-actions button {
+.image-actions button,
+.reset-button,
+.survey-actions button {
   border: none;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.12);
@@ -560,7 +807,9 @@ textarea::placeholder {
   font-size: 13px;
 }
 
-.image-actions button:hover {
+.image-actions button:hover,
+.reset-button:hover,
+.survey-actions button:hover {
   background: rgba(255, 255, 255, 0.18);
 }
 
@@ -619,17 +868,168 @@ textarea::placeholder {
 
 .reset-button {
   margin-top: 12px;
-  border: none;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-  padding: 10px 14px;
-  cursor: pointer;
   align-self: center;
 }
 
-.reset-button:hover {
-  background: rgba(255, 255, 255, 0.18);
+.survey-section {
+  max-width: 1680px;
+  margin: 40px auto 0;
+}
+
+.survey-card {
+  padding: 30px;
+}
+
+.survey-header {
+  text-align: center;
+  margin-bottom: 28px;
+}
+
+.survey-header h2 {
+  margin: 0 0 10px;
+  font-size: 28px;
+}
+
+.survey-header p {
+  margin: 0;
+  color: #b8b8c2;
+  line-height: 1.8;
+}
+
+.survey-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 18px;
+}
+
+.survey-item {
+  background: rgba(255, 255, 255, 0.065);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 20px;
+  padding: 18px;
+}
+
+.survey-item.full {
+  grid-column: 1 / -1;
+}
+
+.survey-item h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.survey-item p {
+  margin: 0 0 14px;
+  color: #a1a1aa;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.choice-list {
+  display: grid;
+  gap: 10px;
+}
+
+.choice-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 13px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  cursor: pointer;
+  color: #f5f5f7;
+}
+
+.choice-option input {
+  display: none;
+}
+
+.choice-option.selected {
+  background: rgba(196, 181, 253, 0.28);
+  border: 1px solid rgba(196, 181, 253, 0.7);
+}
+
+.choice-number {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+}
+
+.choice-option.selected .choice-number {
+  background: #c4b5fd;
+  color: #111;
+}
+
+.rating-block {
+  width: 270px;
+}
+
+.rating-row {
+  display: flex;
+  gap: 10px;
+}
+
+.rating-option {
+  cursor: pointer;
+}
+
+.rating-option input {
+  display: none;
+}
+
+.rating-option span {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  display: grid;
+  place-items: center;
+  color: #f5f5f7;
+}
+
+.rating-option.selected span {
+  background: #c4b5fd;
+  color: #111;
+  font-weight: 700;
+}
+
+.rating-labels {
+  width: 250px;
+  display: flex;
+  justify-content: space-between;
+  margin-top: 8px;
+  color: #9ca3af;
+  font-size: 12px;
+}
+
+.survey-textarea {
+  width: 100%;
+  min-height: 96px;
+  box-sizing: border-box;
+}
+
+.survey-actions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin-top: 24px;
+}
+
+.survey-actions button {
+  background: #f5f3ff;
+  color: #111;
+  font-weight: 700;
+  padding: 12px 18px;
+}
+
+.survey-actions button.secondary {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
 }
 
 .image-modal {
@@ -703,8 +1103,12 @@ textarea::placeholder {
   }
 
   .image-area {
-    max-height: none;
-    min-height: 560px;
+    width: min(100%, 520px);
+    aspect-ratio: 2 / 3;
+  }
+
+  .survey-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -735,6 +1139,19 @@ textarea::placeholder {
 
   .image-area {
     min-height: 420px;
+  }
+
+  .survey-card {
+    padding: 20px;
+  }
+
+  .rating-row {
+    gap: 6px;
+  }
+
+  .rating-option span {
+    width: 34px;
+    height: 34px;
   }
 }
 </style>

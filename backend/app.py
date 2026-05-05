@@ -51,21 +51,7 @@ def generate_character():
         # 第一次：直接生成
         if latest_image_path is None:
             prompt = f"""
-                    Create an anime / manga style illustration of one original cool female character.
-
-                    This is for a university research demo about interactive character design.
-
-                    User requests so far:
                     {recent_context}
-
-                    Requirements:
-                    - One female character
-                    - Anime / manga style
-                    - Stylish and memorable design
-                    - Clean composition
-                    - Upper body or full body
-                    - No text, no logo, no watermark
-                    - Good quality character illustration
                     """
 
             result = client.images.generate(
