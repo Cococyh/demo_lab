@@ -81,6 +81,32 @@
             Version {{ displayVersion }}
           </p>
 
+          <!-- 每张图片即时评分 -->
+          <div v-if="currentHistoryItem" class="image-rating-card">
+            <h3>画像評価</h3>
+            <p class="image-rating-question">
+              この画像は、自分が想像していた結果にどの程度近いですか？
+            </p>
+
+            <div class="image-rating-row">
+              <button
+                v-for="n in 5"
+                :key="n"
+                type="button"
+                class="image-rating-button"
+                :class="{ active: currentHistoryItem.rating === n }"
+                @click="setCurrentImageRating(n)"
+              >
+                {{ n }}
+              </button>
+            </div>
+
+            <div class="image-rating-labels">
+              <span>まったく近くない</span>
+              <span>とても近い</span>
+            </div>
+          </div>
+
           <div v-if="currentImage" class="image-actions">
             <button @click="openImageModal">
               拡大表示
@@ -102,7 +128,10 @@
                 @click="viewHistory(item)"
               >
                 <img :src="item.image" :alt="`version ${item.version}`" />
-                <span>v{{ item.version }}</span>
+                <span class="history-version">v{{ item.version }}</span>
+                <small class="history-rating">
+                  {{ item.rating ? `★${item.rating}` : '未評価' }}
+                </small>
               </button>
             </div>
           </div>
@@ -129,6 +158,7 @@
           <!-- Q1 -->
           <div class="survey-item full">
             <h3>Q1 画像生成AIでキャラクターを作った経験はありますか？</h3>
+            <p>これまでに画像生成モデルを使って、仮想キャラクターを作った経験について教えてください。</p>
 
             <div class="choice-list">
               <label
@@ -157,6 +187,7 @@
           >
             <h3>{{ question.title }}</h3>
             <p>{{ question.description }}</p>
+
             <div class="rating-block">
               <div class="rating-row">
                 <label
@@ -174,10 +205,11 @@
                   <span>{{ n }}</span>
                 </label>
               </div>
-            </div>
-            <div class="rating-labels">
-              <span>低い</span>
-              <span>高い</span>
+
+              <div class="rating-labels">
+                <span>低い</span>
+                <span>高い</span>
+              </div>
             </div>
           </div>
 
@@ -187,7 +219,6 @@
             <textarea
               v-model="survey.problem"
               class="survey-textarea"
-              placeholder="操作中に困った点や、分かりにくかった点があれば書いてください。"
             ></textarea>
           </div>
 
@@ -196,7 +227,6 @@
             <textarea
               v-model="survey.suggestion"
               class="survey-textarea"
-              placeholder="追加してほしい機能や、改善してほしい点があれば書いてください。"
             ></textarea>
           </div>
 
@@ -205,14 +235,13 @@
             <textarea
               v-model="survey.scene"
               class="survey-textarea"
-              placeholder="このシステムが役に立ちそうな場面や使い方について、自由に書いてください。"
             ></textarea>
           </div>
         </div>
 
         <div class="survey-actions">
-          <button @click="downloadSurveyCsv">
-            回答をCSVで保存
+          <button @click="saveSurveyToServer">
+            回答を保存
           </button>
           <button class="secondary" @click="resetSurvey">
             アンケートをリセット
@@ -239,7 +268,7 @@
 </template>
 
 <script setup>
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 
 const inputText = ref('')
 const loading = ref(false)
@@ -258,6 +287,14 @@ const messages = ref([
       'こんにちは。あなたが思う「かっこいい女性キャラクター」について教えてください。まだ曖昧でも大丈夫です。'
   }
 ])
+
+const currentHistoryItem = computed(() => {
+  return (
+    imageHistory.value.find(
+      (item) => item.version === displayVersion.value
+    ) || null
+  )
+})
 
 const experienceOptions = [
   {
@@ -285,13 +322,13 @@ const experienceOptions = [
 const ratingQuestions = [
   {
     key: 'dialogue',
-    title: 'Q2 対話だけでキャラクターのイメージを伝えることは簡単でしたか？',
+    title: 'Q2 対話だけでキャラクターを説明することは簡単でしたか？',
     description: '言葉だけで自分のイメージを伝えやすかったかを評価してください。'
   },
   {
     key: 'match',
-    title: 'Q3 キャラクターの変化を自分でコントロールできると感じましたか？',
-    description: '自分の指示によってキャラクターを調整できた感覚があったかを評価してください。'
+    title: 'Q3 生成されたキャラクターは、自分のイメージに合っていましたか？',
+    description: '生成結果が自分の想像に近かったかを評価してください。'
   },
   {
     key: 'consistency',
@@ -300,12 +337,12 @@ const ratingQuestions = [
   },
   {
     key: 'control',
-    title: 'Q5 生成されたキャラクターは、自分のイメージに合っていましたか？',
-    description: '生成結果が自分の想像に近かったかを評価してください。'
+    title: 'Q5 キャラクターの変化を自分でコントロールできると感じましたか？',
+    description: '自分の指示によってキャラクターを調整できた感覚があったかを評価してください。'
   },
   {
     key: 'retry',
-    title: 'Q6 機会があれば、もう一度キャラクターを作ってみたいですか？',
+    title: 'Q6 機会があれば、もう一度このシステムでキャラクターを作ってみたいですか？',
     description: '今後もこのような方法でキャラクターを作ってみたいかを評価してください。'
   }
 ]
@@ -368,7 +405,8 @@ async function sendMessage() {
       id: Date.now() + 2,
       version: generationCount.value,
       image: data.image,
-      message: text
+      message: text,
+      rating: ''
     })
   } catch (error) {
     messages.value.push({
@@ -385,6 +423,11 @@ async function sendMessage() {
 function viewHistory(item) {
   currentImage.value = item.image
   displayVersion.value = item.version
+}
+
+function setCurrentImageRating(value) {
+  if (!currentHistoryItem.value) return
+  currentHistoryItem.value.rating = value
 }
 
 function openImageModal() {
@@ -458,67 +501,64 @@ function resetSurvey() {
   }
 }
 
-function escapeCsv(value) {
-  const text = String(value ?? '')
-  return `"${text.replace(/"/g, '""')}"`
-}
+async function saveSurveyToServer() {
+  try {
+    const unratedImages = imageHistory.value.filter((item) => !item.rating)
 
-function downloadSurveyCsv() {
-  const now = new Date().toISOString()
+    if (unratedImages.length > 0) {
+      const ok = window.confirm(
+        '未評価の画像があります。このまま保存しますか？'
+      )
 
-  const latestUserMessages = messages.value
-    .filter((message) => message.role === 'user')
-    .map((message) => message.content)
-    .join(' / ')
+      if (!ok) {
+        return
+      }
+    }
 
-  const headers = [
-    'timestamp',
-    'generation_count',
-    'experience',
-    'dialogue',
-    'match',
-    'consistency',
-    'control',
-    'retry',
-    'problem',
-    'suggestion',
-    'scene',
-    'user_prompts'
-  ]
+    const latestUserMessages = messages.value
+      .filter((message) => message.role === 'user')
+      .map((message) => message.content)
+      .join(' / ')
 
-  const row = [
-    now,
-    generationCount.value,
-    survey.value.experience,
-    survey.value.dialogue,
-    survey.value.match,
-    survey.value.consistency,
-    survey.value.control,
-    survey.value.retry,
-    survey.value.problem,
-    survey.value.suggestion,
-    survey.value.scene,
-    latestUserMessages
-  ]
+    const response = await fetch('http://127.0.0.1:5000/api/save-survey', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        generation_count: generationCount.value,
+        experience: survey.value.experience,
+        dialogue: survey.value.dialogue,
+        match: survey.value.match,
+        consistency: survey.value.consistency,
+        control: survey.value.control,
+        retry: survey.value.retry,
+        problem: survey.value.problem,
+        suggestion: survey.value.suggestion,
+        scene: survey.value.scene,
+        user_prompts: latestUserMessages,
+        image_ratings: imageHistory.value
+          .slice()
+          .reverse()
+          .map((item) => ({
+            version: item.version,
+            prompt: item.message,
+            rating: item.rating || ''
+          }))
+      })
+    })
 
-  const csv =
-    '\uFEFF' +
-    headers.map(escapeCsv).join(',') +
-    '\n' +
-    row.map(escapeCsv).join(',')
+    const data = await response.json()
 
-  const blob = new Blob([csv], {
-    type: 'text/csv;charset=utf-8;'
-  })
+    if (!response.ok) {
+      throw new Error(data.error || '保存に失敗しました')
+    }
 
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = `character_demo_survey_${Date.now()}.csv`
-  document.body.appendChild(link)
-  link.click()
-  document.body.removeChild(link)
-  URL.revokeObjectURL(url)
+    alert('アンケートと画像評価を保存しました。')
+  } catch (error) {
+    console.error(error)
+    alert('保存に失敗しました：' + error.message)
+  }
 }
 
 async function scrollToBottom() {
@@ -579,7 +619,7 @@ h1 {
   max-width: 1680px;
   margin: 0 auto;
   display: grid;
-  grid-template-columns: minmax(520px, 0.95fr) minmax(620px, 1.05fr);
+  grid-template-columns: minmax(520px, 1fr) minmax(560px, 0.9fr);
   gap: 32px;
   min-height: calc(100dvh - 170px);
   align-items: stretch;
@@ -788,6 +828,61 @@ textarea::placeholder {
   text-align: right;
 }
 
+.image-rating-card {
+  margin-top: 14px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.image-rating-card h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  color: #f5f5f7;
+}
+
+.image-rating-question {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: #d4d4d8;
+  line-height: 1.6;
+}
+
+.image-rating-row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.image-rating-button {
+  width: 40px;
+  height: 40px;
+  border: none;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+  transition: 0.2s;
+}
+
+.image-rating-button:hover {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.image-rating-button.active {
+  background: #c4b5fd;
+  color: #111;
+}
+
+.image-rating-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #9ca3af;
+}
+
 .image-actions {
   display: flex;
   justify-content: flex-end;
@@ -855,7 +950,7 @@ textarea::placeholder {
   padding: 0;
 }
 
-.history-item span {
+.history-version {
   position: absolute;
   left: 6px;
   bottom: 6px;
@@ -864,6 +959,17 @@ textarea::placeholder {
   font-size: 11px;
   border-radius: 999px;
   padding: 3px 8px;
+}
+
+.history-rating {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  font-size: 10px;
+  border-radius: 999px;
+  padding: 3px 7px;
 }
 
 .reset-button {
@@ -1138,11 +1244,16 @@ textarea::placeholder {
   }
 
   .image-area {
-    min-height: 420px;
+    width: min(100%, 420px);
+    aspect-ratio: 2 / 3;
   }
 
   .survey-card {
     padding: 20px;
+  }
+
+  .rating-block {
+    width: 240px;
   }
 
   .rating-row {
@@ -1152,6 +1263,10 @@ textarea::placeholder {
   .rating-option span {
     width: 34px;
     height: 34px;
+  }
+
+  .rating-labels {
+    width: 210px;
   }
 }
 </style>
