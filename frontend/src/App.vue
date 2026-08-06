@@ -41,6 +41,7 @@
             v-model="inputText"
             placeholder="例：黒いロングコートを着た、冷静で強そうな女性キャラクター"
             @keydown.enter.exact.prevent="sendMessage"
+            @keydown.ctrl.exact.prevent="sendMessage"
           ></textarea>
 
           <button type="submit" :disabled="loading">
@@ -284,7 +285,7 @@ const messages = ref([
     id: Date.now(),
     role: 'assistant',
     content:
-      'こんにちは。あなたが思う「かっこいい女性キャラクター」について教えてください。まだ曖昧でも大丈夫です。'
+      'こんにちは。あなたが思う「かっこいい女性キャラクター」について教えてください。たとえば、雰囲気、服装、髪型、表情、ポーズ、イラストのスタイルなど、思いつく範囲で自由に書いてください。まだ曖昧の言葉でも大丈夫です。'
   }
 ])
 
@@ -466,7 +467,7 @@ async function resetCharacter() {
         id: Date.now(),
         role: 'assistant',
         content:
-          'こんにちは。あなたが思う「かっこいい女性キャラクター」について教えてください。まだ曖昧でも大丈夫です。'
+          'こんにちは。あなたが思う「かっこいい女性キャラクター」について教えてください。たとえば、雰囲気、服装、髪型、表情、ポーズ、イラストのスタイルなど、思いつく範囲で自由に書いてください。まだ曖昧の言葉でも大丈夫です。'
       }
     ]
 
