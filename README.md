@@ -18,7 +18,7 @@ cp .env.example .env
 python app.py
 ```
 
-默认采用适合课堂测试的快速配置：`gpt-image-2`、`1024x1024`、`low`、JPEG 85%。如果更重视画质，可在 `.env` 中把 `OPENAI_IMAGE_QUALITY` 改为 `medium`。
+默认采用适合课堂测试的快速配置：`gpt-image-2`、`768x1024`、`low`、JPEG 85%。
 
 ## 启动前端
 
@@ -36,7 +36,7 @@ VITE_API_BASE_URL=https://your-api.example.com
 
 ## 本次测试版优化
 
-- 使用低质量方形草稿缩短图像生成时间。
+- 使用 `768x1024` 低质量竖图，在角色展示和生成速度之间取得平衡。
 - JPEG 压缩减少后端响应体积和浏览器内存占用。
 - 生成期间保留上一版本，并显示经过时间和当前阶段。
 - 每位测试者拥有独立会话，支持多人同时测试。
