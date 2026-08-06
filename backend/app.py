@@ -18,7 +18,7 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # 测试时优先缩短等待时间；需要高质量结果时可在 .env 中覆盖。
 IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
-IMAGE_SIZE = os.getenv("OPENAI_IMAGE_SIZE", "1024x1024")
+IMAGE_SIZE = os.getenv("OPENAI_IMAGE_SIZE", "768x1024")
 IMAGE_QUALITY = os.getenv("OPENAI_IMAGE_QUALITY", "low")
 IMAGE_FORMAT = os.getenv("OPENAI_IMAGE_FORMAT", "jpeg")
 IMAGE_COMPRESSION = int(os.getenv("OPENAI_IMAGE_COMPRESSION", "85"))
