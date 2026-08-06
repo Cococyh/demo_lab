@@ -31,7 +31,8 @@
           <div v-if="loading" class="message-row assistant">
             <div class="bubble">
               <p class="role-label">Agent</p>
-              <p class="message-text">生成しています...</p>
+              <p class="message-text">{{ loadingStage }}</p>
+              <p class="wait-time">{{ elapsedSeconds }}秒経過</p>
             </div>
           </div>
         </div>
@@ -64,22 +65,31 @@
               <span>左側のチャットから始めてください</span>
             </div>
 
-            <div v-if="loading" class="loading-preview">
-              <div class="loader"></div>
-              <p>Generating...</p>
-            </div>
-
             <img
-              v-if="currentImage && !loading"
+              v-if="currentImage"
               :src="currentImage"
               alt="生成されたキャラクター"
               class="preview-image"
+              :class="{ generating: loading }"
               @click="openImageModal"
             />
+
+            <div v-if="loading" class="loading-preview">
+              <div class="loader"></div>
+              <p>{{ loadingStage }}</p>
+              <span>{{ elapsedSeconds }}秒</span>
+            </div>
+
+            <div v-if="loading" class="generation-progress" aria-live="polite">
+              <span :style="{ width: `${estimatedProgress}%` }"></span>
+            </div>
           </div>
 
           <p v-if="displayVersion > 0" class="version-text">
             Version {{ displayVersion }}
+            <span v-if="currentHistoryItem?.generationSeconds">
+              ・ {{ currentHistoryItem.generationSeconds }}秒
+            </span>
           </p>
 
           <!-- 每张图片即时评分 -->
@@ -132,6 +142,9 @@
                 <span class="history-version">v{{ item.version }}</span>
                 <small class="history-rating">
                   {{ item.rating ? `★${item.rating}` : '未評価' }}
+                </small>
+                <small v-if="item.generationSeconds" class="history-time">
+                  {{ item.generationSeconds }}秒
                 </small>
               </button>
             </div>
@@ -269,7 +282,10 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+
+const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://127.0.0.1:5000'
+const sessionId = getOrCreateSessionId()
 
 const inputText = ref('')
 const loading = ref(false)
@@ -279,6 +295,48 @@ const displayVersion = ref(0)
 const chatBody = ref(null)
 const imageHistory = ref([])
 const showImageModal = ref(false)
+const elapsedSeconds = ref(0)
+let elapsedTimer = null
+
+const loadingStage = computed(() => {
+  if (elapsedSeconds.value < 8) return '指示内容を整理しています…'
+  if (elapsedSeconds.value < 25) return 'キャラクターの構図を作成しています…'
+  return '表情や衣装の細部を描画しています…'
+})
+
+const estimatedProgress = computed(() => {
+  if (!loading.value) return 100
+  return Math.min(92, 8 + elapsedSeconds.value * 2.1)
+})
+
+function getOrCreateSessionId() {
+  const storageKey = 'character-demo-session-id'
+  const existing = window.localStorage.getItem(storageKey)
+  if (existing) return existing
+
+  const created = window.crypto?.randomUUID?.()
+    || `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  window.localStorage.setItem(storageKey, created)
+  return created
+}
+
+function startElapsedTimer() {
+  stopElapsedTimer()
+  elapsedSeconds.value = 0
+  const startedAt = Date.now()
+  elapsedTimer = window.setInterval(() => {
+    elapsedSeconds.value = Math.floor((Date.now() - startedAt) / 1000)
+  }, 250)
+}
+
+function stopElapsedTimer() {
+  if (elapsedTimer) {
+    window.clearInterval(elapsedTimer)
+    elapsedTimer = null
+  }
+}
+
+onBeforeUnmount(stopElapsedTimer)
 
 const messages = ref([
   {
@@ -373,16 +431,18 @@ async function sendMessage() {
 
   inputText.value = ''
   loading.value = true
+  startElapsedTimer()
   scrollToBottom()
 
   try {
-    const response = await fetch('http://127.0.0.1:5000/api/generate', {
+    const response = await fetch(`${apiBase}/api/generate`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        message: text
+        message: text,
+        session_id: sessionId
       })
     })
 
@@ -407,7 +467,8 @@ async function sendMessage() {
       version: generationCount.value,
       image: data.image,
       message: text,
-      rating: ''
+      rating: '',
+      generationSeconds: data.elapsed_seconds
     })
   } catch (error) {
     messages.value.push({
@@ -416,6 +477,7 @@ async function sendMessage() {
       content: 'エラーが発生しました：' + error.message
     })
   } finally {
+    stopElapsedTimer()
     loading.value = false
     scrollToBottom()
   }
@@ -446,7 +508,7 @@ function downloadCurrentImage() {
 
   const link = document.createElement('a')
   link.href = currentImage.value
-  link.download = `character_v${displayVersion.value || 'current'}.png`
+  link.download = `character_v${displayVersion.value || 'current'}.jpg`
   document.body.appendChild(link)
   link.click()
   document.body.removeChild(link)
@@ -454,8 +516,12 @@ function downloadCurrentImage() {
 
 async function resetCharacter() {
   try {
-    const response = await fetch('http://127.0.0.1:5000/api/reset', {
-      method: 'POST'
+    const response = await fetch(`${apiBase}/api/reset`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ session_id: sessionId })
     })
 
     if (!response.ok) {
@@ -521,13 +587,30 @@ async function saveSurveyToServer() {
       .map((message) => message.content)
       .join(' / ')
 
-    const response = await fetch('http://127.0.0.1:5000/api/save-survey', {
+    const generationTimes = imageHistory.value
+      .slice()
+      .reverse()
+      .map((item) => item.generationSeconds)
+      .filter((value) => typeof value === 'number')
+
+    const averageGenerationSeconds = generationTimes.length
+      ? Math.round(
+          generationTimes.reduce((sum, value) => sum + value, 0)
+          / generationTimes.length
+          * 10
+        ) / 10
+      : ''
+
+    const response = await fetch(`${apiBase}/api/save-survey`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
+        session_id: sessionId,
         generation_count: generationCount.value,
+        generation_times: generationTimes,
+        average_generation_seconds: averageGenerationSeconds,
         experience: survey.value.experience,
         dialogue: survey.value.dialogue,
         match: survey.value.match,
@@ -544,7 +627,8 @@ async function saveSurveyToServer() {
           .map((item) => ({
             version: item.version,
             prompt: item.message,
-            rating: item.rating || ''
+            rating: item.rating || '',
+            generation_seconds: item.generationSeconds || ''
           }))
       })
     })
@@ -712,6 +796,13 @@ h1 {
   white-space: pre-wrap;
 }
 
+.wait-time {
+  margin: 7px 0 0;
+  color: #c4b5fd;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
 .input-area {
   padding: 18px;
   display: grid;
@@ -771,8 +862,9 @@ textarea::placeholder {
 }
 
 .image-area {
+  position: relative;
   width: min(100%, 520px);
-  aspect-ratio: 2 / 3;
+  aspect-ratio: 1;
   margin: 0 auto;
   border-radius: 24px;
   background:
@@ -794,12 +886,33 @@ textarea::placeholder {
 
 .preview-image {
   cursor: zoom-in;
+  transition: filter 0.3s ease, opacity 0.3s ease, transform 0.3s ease;
+}
+
+.preview-image.generating {
+  filter: blur(2px) saturate(0.7);
+  opacity: 0.38;
+  transform: scale(1.015);
 }
 
 .empty-preview,
 .loading-preview {
   text-align: center;
   color: #a1a1aa;
+}
+
+.loading-preview {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 28px;
+  box-sizing: border-box;
+  background: rgba(13, 13, 18, 0.4);
+  backdrop-filter: blur(2px);
 }
 
 .empty-preview p,
@@ -810,6 +923,32 @@ textarea::placeholder {
 
 .empty-preview span {
   font-size: 13px;
+}
+
+.loading-preview span {
+  color: #c4b5fd;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.generation-progress {
+  position: absolute;
+  right: 18px;
+  bottom: 16px;
+  left: 18px;
+  z-index: 3;
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.generation-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #8b5cf6, #d8b4fe);
+  transition: width 0.3s ease;
 }
 
 .loader {
@@ -971,6 +1110,17 @@ textarea::placeholder {
   font-size: 10px;
   border-radius: 999px;
   padding: 3px 7px;
+}
+
+.history-time {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #ddd6fe;
+  font-size: 10px;
 }
 
 .reset-button {
@@ -1211,7 +1361,7 @@ textarea::placeholder {
 
   .image-area {
     width: min(100%, 520px);
-    aspect-ratio: 2 / 3;
+    aspect-ratio: 1;
   }
 
   .survey-grid {
@@ -1246,7 +1396,7 @@ textarea::placeholder {
 
   .image-area {
     width: min(100%, 420px);
-    aspect-ratio: 2 / 3;
+    aspect-ratio: 1;
   }
 
   .survey-card {
