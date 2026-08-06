@@ -864,7 +864,7 @@ textarea::placeholder {
 .image-area {
   position: relative;
   width: min(100%, 520px);
-  aspect-ratio: 1;
+  aspect-ratio: 3 / 4;
   margin: 0 auto;
   border-radius: 24px;
   background:
@@ -1361,7 +1361,7 @@ textarea::placeholder {
 
   .image-area {
     width: min(100%, 520px);
-    aspect-ratio: 1;
+    aspect-ratio: 3 / 4;
   }
 
   .survey-grid {
@@ -1396,7 +1396,7 @@ textarea::placeholder {
 
   .image-area {
     width: min(100%, 420px);
-    aspect-ratio: 1;
+    aspect-ratio: 3 / 4;
   }
 
   .survey-card {
