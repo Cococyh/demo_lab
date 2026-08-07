@@ -5,6 +5,8 @@ from dotenv import load_dotenv
 import os
 import base64
 import csv
+import json
+import time
 from datetime import datetime
 
 load_dotenv()
@@ -14,9 +16,15 @@ CORS(app)
 
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-# 单用户测试状态
-conversation_memory = []
-latest_image_path = None
+# 测试时优先缩短等待时间；需要高质量结果时可在 .env 中覆盖。
+IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-2")
+IMAGE_SIZE = os.getenv("OPENAI_IMAGE_SIZE", "768x1024")
+IMAGE_QUALITY = os.getenv("OPENAI_IMAGE_QUALITY", "low")
+IMAGE_FORMAT = os.getenv("OPENAI_IMAGE_FORMAT", "jpeg")
+IMAGE_COMPRESSION = int(os.getenv("OPENAI_IMAGE_COMPRESSION", "85"))
+
+# 每位测试者使用独立状态，避免多人测试时互相污染对话和图片。
+sessions = {}
 
 # 保存生成图片的文件夹
 IMAGE_DIR = "generated_images"
@@ -27,16 +35,43 @@ SURVEY_DIR = "survey_results"
 os.makedirs(SURVEY_DIR, exist_ok=True)
 
 
-def save_base64_image(image_base64, prefix="character"):
+def save_base64_image(image_base64, prefix="character", extension="jpeg"):
     """把 API 返回的 base64 图片保存到本地文件，返回文件路径"""
     image_bytes = base64.b64decode(image_base64)
-    filename = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+    filename = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')}.{extension}"
     file_path = os.path.join(IMAGE_DIR, filename)
 
     with open(file_path, "wb") as f:
         f.write(image_bytes)
 
     return file_path
+
+
+def get_session(data):
+    """取得当前测试者的独立会话。"""
+    session_id = str(data.get("session_id", "default"))[:128]
+    if not session_id:
+        session_id = "default"
+
+    state = sessions.setdefault(
+        session_id,
+        {"conversation_memory": [], "latest_image_path": None}
+    )
+    return session_id, state
+
+
+def image_request_options():
+    options = {
+        "model": IMAGE_MODEL,
+        "size": IMAGE_SIZE,
+        "quality": IMAGE_QUALITY,
+        "output_format": IMAGE_FORMAT,
+    }
+
+    if IMAGE_FORMAT in {"jpeg", "webp"}:
+        options["output_compression"] = IMAGE_COMPRESSION
+
+    return options
 
 
 def append_csv_row(file_path, headers, row):
@@ -54,36 +89,37 @@ def append_csv_row(file_path, headers, row):
 
 @app.route("/api/generate", methods=["POST"])
 def generate_character():
-    global latest_image_path, conversation_memory
-
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
     message = data.get("message", "").strip()
 
     if not message:
         return jsonify({"error": "message is required"}), 400
 
-    conversation_memory.append(message)
-    recent_context = "\n".join(conversation_memory[-6:])
+    _, state = get_session(data)
+    state["conversation_memory"].append(message)
+    recent_context = "\n".join(state["conversation_memory"][-6:])
+    started_at = time.perf_counter()
 
     try:
         # 第一次：根据用户输入直接生成
-        if latest_image_path is None:
+        if state["latest_image_path"] is None:
             prompt = f"""
 User requests:
 {recent_context}
+
+Create one centered, full-body virtual character with a clean composition.
 """
 
             result = client.images.generate(
-                model="gpt-image-2",
                 prompt=prompt,
-                size="1024x1536",
-                quality="medium"
+                **image_request_options()
             )
 
             image_base64 = result.data[0].b64_json
-            latest_image_path = save_base64_image(
+            state["latest_image_path"] = save_base64_image(
                 image_base64,
-                prefix="character"
+                prefix="character",
+                extension=IMAGE_FORMAT
             )
 
             reply = "生成しました。"
@@ -98,27 +134,34 @@ Latest user request:
 {message}
 """
 
-            with open(latest_image_path, "rb") as image_file:
+            with open(state["latest_image_path"], "rb") as image_file:
                 result = client.images.edit(
-                    model="gpt-image-2",
                     image=image_file,
                     prompt=edit_prompt,
-                    size="1024x1536"
+                    **image_request_options()
                 )
 
             image_base64 = result.data[0].b64_json
-            latest_image_path = save_base64_image(
+            state["latest_image_path"] = save_base64_image(
                 image_base64,
-                prefix="character_edit"
+                prefix="character_edit",
+                extension=IMAGE_FORMAT
             )
 
             reply = "修正しました。"
 
-        image_url = f"data:image/png;base64,{image_base64}"
+        elapsed_seconds = round(time.perf_counter() - started_at, 1)
+        image_url = f"data:image/{IMAGE_FORMAT};base64,{image_base64}"
 
         return jsonify({
             "reply": reply,
-            "image": image_url
+            "image": image_url,
+            "elapsed_seconds": elapsed_seconds,
+            "generation": {
+                "model": IMAGE_MODEL,
+                "size": IMAGE_SIZE,
+                "quality": IMAGE_QUALITY
+            }
         })
 
     except Exception as e:
@@ -128,7 +171,7 @@ Latest user request:
 
 @app.route("/api/save-survey", methods=["POST"])
 def save_survey():
-    data = request.get_json()
+    data = request.get_json(silent=True) or {}
 
     survey_id = datetime.now().strftime("%Y%m%d_%H%M%S")
     timestamp = datetime.now().isoformat()
@@ -140,7 +183,10 @@ def save_survey():
     summary_headers = [
         "survey_id",
         "timestamp",
+        "session_id",
         "generation_count",
+        "generation_times",
+        "average_generation_seconds",
         "experience",
         "dialogue",
         "match",
@@ -156,7 +202,14 @@ def save_survey():
     summary_row = {
         "survey_id": survey_id,
         "timestamp": timestamp,
+        "session_id": data.get("session_id", ""),
         "generation_count": data.get("generation_count", ""),
+        "generation_times": json.dumps(
+            data.get("generation_times", []), ensure_ascii=False
+        ),
+        "average_generation_seconds": data.get(
+            "average_generation_seconds", ""
+        ),
         "experience": data.get("experience", ""),
         "dialogue": data.get("dialogue", ""),
         "match": data.get("match", ""),
@@ -177,7 +230,8 @@ def save_survey():
         "timestamp",
         "version",
         "prompt",
-        "rating"
+        "rating",
+        "generation_seconds"
     ]
 
     image_ratings = data.get("image_ratings", [])
@@ -188,7 +242,8 @@ def save_survey():
             "timestamp": timestamp,
             "version": item.get("version", ""),
             "prompt": item.get("prompt", ""),
-            "rating": item.get("rating", "")
+            "rating": item.get("rating", ""),
+            "generation_seconds": item.get("generation_seconds", "")
         }
 
         append_csv_row(image_rating_file, image_rating_headers, row)
@@ -203,12 +258,11 @@ def save_survey():
 
 @app.route("/api/reset", methods=["POST"])
 def reset_character():
-    global latest_image_path, conversation_memory
+    data = request.get_json(silent=True) or {}
+    session_id = str(data.get("session_id", "default"))[:128] or "default"
+    sessions.pop(session_id, None)
 
-    latest_image_path = None
-    conversation_memory = []
-
-    print("RESET OK: conversation_memory cleared, latest_image_path cleared")
+    print(f"RESET OK: session {session_id} cleared")
 
     return jsonify({"message": "reset ok"})
 
