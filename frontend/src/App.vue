@@ -42,11 +42,12 @@
             <textarea
               v-model="inputText"
               placeholder="例：黒いロングコートを着た、冷静で強そうな女性キャラクター"
+              @keydown.enter.exact.prevent
               @keydown.enter.ctrl.exact.prevent="sendMessage"
               @keydown.enter.meta.exact.prevent="sendMessage"
             ></textarea>
             <p class="shortcut-hint">
-              Enterで改行 · Ctrl / ⌘ + Enterで送信
+              Ctrl / ⌘ + Enterで送信
             </p>
           </div>
 
