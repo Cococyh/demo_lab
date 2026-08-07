@@ -712,8 +712,7 @@ h1 {
   display: grid;
   grid-template-columns: minmax(520px, 1fr) minmax(560px, 0.9fr);
   gap: 32px;
-  min-height: calc(100dvh - 170px);
-  align-items: stretch;
+  align-items: start;
 }
 
 .chat-panel,
@@ -730,7 +729,8 @@ h1 {
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  min-height: 680px;
+  height: clamp(560px, 68dvh, 680px);
+  min-height: 0;
 }
 
 .chat-header {
@@ -754,8 +754,11 @@ h1 {
 
 .chat-body {
   flex: 1;
+  min-height: 0;
   padding: 24px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 
 .message-row {
@@ -869,7 +872,7 @@ textarea::placeholder {
 }
 
 .preview-card {
-  height: 100%;
+  height: auto;
   min-height: 680px;
   padding: 22px;
   box-sizing: border-box;
@@ -1380,6 +1383,10 @@ textarea::placeholder {
     min-height: 720px;
   }
 
+  .chat-panel {
+    height: clamp(540px, 68dvh, 660px);
+  }
+
   .image-area {
     width: min(100%, 520px);
     aspect-ratio: 3 / 4;
@@ -1405,6 +1412,12 @@ textarea::placeholder {
 
   .layout {
     min-height: auto;
+  }
+
+  .chat-panel {
+    height: 70dvh;
+    min-height: 480px;
+    max-height: 620px;
   }
 
   .input-area {
