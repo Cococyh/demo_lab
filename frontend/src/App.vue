@@ -38,12 +38,17 @@
         </div>
 
         <form class="input-area" @submit.prevent="sendMessage">
-          <textarea
-            v-model="inputText"
-            placeholder="例：黒いロングコートを着た、冷静で強そうな女性キャラクター"
-            @keydown.enter.exact.prevent="sendMessage"
-            @keydown.ctrl.exact.prevent="sendMessage"
-          ></textarea>
+          <div class="input-compose">
+            <textarea
+              v-model="inputText"
+              placeholder="例：黒いロングコートを着た、冷静で強そうな女性キャラクター"
+              @keydown.enter.ctrl.exact.prevent="sendMessage"
+              @keydown.enter.meta.exact.prevent="sendMessage"
+            ></textarea>
+            <p class="shortcut-hint">
+              Enterで改行 · Ctrl / ⌘ + Enterで送信
+            </p>
+          </div>
 
           <button type="submit" :disabled="loading">
             送信
@@ -808,12 +813,19 @@ h1 {
   display: grid;
   grid-template-columns: 1fr 88px;
   gap: 12px;
+  align-items: end;
   background: rgba(0, 0, 0, 0.16);
   border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
+.input-compose {
+  min-width: 0;
+}
+
 textarea {
+  width: 100%;
   height: 58px;
+  box-sizing: border-box;
   resize: none;
   border: none;
   outline: none;
@@ -827,6 +839,14 @@ textarea {
 
 textarea::placeholder {
   color: #85858f;
+}
+
+.shortcut-hint {
+  margin: 7px 4px 0;
+  color: #85858f;
+  font-size: 11px;
+  line-height: 1.4;
+  text-align: right;
 }
 
 .input-area button {
