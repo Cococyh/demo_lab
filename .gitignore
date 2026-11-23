@@ -31,5 +31,10 @@ generated_images/
 outputs/
 uploads/
 
-# 用户调查数据
+# 实验数据（含参加者信息，不要提交）
 survey_results/
+logs/
+backend/logs/
+
+# 隧道工具（本地下载，不提交）
+tools/cloudflared.exe
