@@ -263,7 +263,7 @@
               </button>
               <!-- 選ぶ前から場所を確保しておく（表示されたときに画像がずれないように） -->
               <p class="final-hint" :class="{ hidden: !finalVersion }">
-                {{ t('finalHint', { v: finalVersion || 1 }) }}
+                {{ t(isOnline ? 'finalHintOnline' : 'finalHint', { v: finalVersion || 1 }) }}
               </p>
             </div>
           </div>
@@ -287,7 +287,7 @@
             <textarea
               ref="composerInput"
               v-model="inputText"
-              rows="6"
+              rows="5"
               :disabled="loading"
               :placeholder="t(imageHistory.length && !restartPending ? 'placeholderEdit' : 'placeholderNew')"
               @keydown.enter.ctrl.prevent="sendMessage"
@@ -478,6 +478,39 @@
 
           <div class="dialog-actions">
             <button type="button" class="dialog-cancel" @click="requestCloseThanks">{{ t('close') }}</button>
+          </div>
+        </div>
+      </div>
+    </Transition>
+
+    <!-- 最終画像を選ばずに終了しようとしたとき：1つ選ぶまで終了できない -->
+    <Transition name="fade">
+      <div v-if="pickOpen" class="modal" @click="pickOpen = false">
+        <div class="dialog-box pick-box" role="dialog" aria-modal="true" @click.stop>
+          <p class="dialog-message">{{ t('finishNoFinal') }}</p>
+          <div class="pick-grid">
+            <button
+              v-for="item in imageHistory"
+              :key="item.id"
+              type="button"
+              class="pick-item"
+              :class="{ on: pickVersion === item.version }"
+              @click="pickVersion = item.version"
+            >
+              <img :src="item.image" :alt="`Ver. ${item.version}`" />
+              <span>Ver. {{ item.version }}</span>
+            </button>
+          </div>
+          <div class="dialog-actions">
+            <button type="button" class="dialog-cancel" @click="pickOpen = false">{{ t('back') }}</button>
+            <button
+              type="button"
+              class="dialog-ok"
+              :disabled="!pickVersion || pickBusy"
+              @click="confirmPick"
+            >
+              {{ pickVersion ? t('pickFinalOk', { v: pickVersion }) : t('pickFinalNone') }}
+            </button>
           </div>
         </div>
       </div>
@@ -1172,7 +1205,7 @@ const surveyOpen = ref(false)
 const surveyState = ref('idle') // idle | sending | sent | error
 const surveyError = ref('')
 function newSurvey() {
-  return { q1: 0, q2: 0, qc: 0, q3: 0, q4: [], q4_other: '', q5: [], q5_other: '', q6: [], q6_other: '', q7: '' }
+  return { q1: 0, qc: 0, q3: 0, q4: [], q4_other: '', q5: [], q5_other: '', q6: [], q6_other: '', q7: '' }
 }
 const survey = ref(newSurvey())
 // 「特になし」は他の難しさと同時に選べない：新しく押した方を残す
@@ -1256,22 +1289,49 @@ function closeThanks() {
   setLang('ja', { log: false })
 }
 
+// 最終画像を選ばずに終了しようとしたら、画像の一覧から1つ選ぶまで終了させない
+const pickOpen = ref(false)
+const pickVersion = ref(0)
+const pickBusy = ref(false)
+
+async function confirmPick() {
+  if (!pickVersion.value || pickBusy.value) return
+  pickBusy.value = true
+  try {
+    await callApi('/api/final', { version: pickVersion.value })
+    finalVersion.value = pickVersion.value
+  } catch (error) {
+    pickBusy.value = false
+    await askDialog({ message: t('recordFailed') + errorText(error) })
+    return
+  }
+  pickBusy.value = false
+  pickOpen.value = false
+  await doFinish()
+}
+
 async function finishSession() {
-  const noFinal = imageHistory.value.length > 0 && !finalVersion.value
+  if (imageHistory.value.length > 0 && !finalVersion.value) {
+    pickVersion.value = 0
+    pickOpen.value = true
+    return
+  }
   const chosen = finalVersion.value
-  const pid = participantId.value
   const ok = await askDialog({
-    message: noFinal
-      ? t('finishNoFinal')
-      : chosen
-        ? t('finishConfirm', { v: chosen })
-        : t('finishConfirmEmpty'),
+    message: chosen
+      ? t(isOnline ? 'finishConfirmOnline' : 'finishConfirm', { v: chosen })
+      : t('finishConfirmEmpty'),
     okText: t('finishOk'),
     cancelText: t('back'),
     danger: true
   })
   if (!ok) return
+  await doFinish()
+}
 
+async function doFinish() {
+  const chosen = finalVersion.value
+  const pid = participantId.value
   try {
     await postJson('/api/event', { event: 'finish' }).catch(() => {})
     await callApi('/api/reset')
@@ -2418,7 +2478,7 @@ const genLabel = computed(() => {
 .ed-form textarea {
   width: 100%;
   box-sizing: border-box;
-  min-height: 150px;
+  min-height: 120px;
   padding: 14px 16px;
   font: inherit;
   font-size: 15px;
@@ -3036,6 +3096,58 @@ const genLabel = computed(() => {
   background: var(--danger);
 }
 
+.dialog-ok:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* 終了時に最終画像を選ぶダイアログ */
+.pick-box {
+  width: min(640px, 100%);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.pick-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: 10px;
+  margin: 0 0 20px;
+}
+
+.pick-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ink);
+  background: #fff;
+  border: 2px solid #e4e1d7;
+  border-radius: 12px;
+  cursor: pointer;
+}
+
+.pick-item img {
+  width: 100%;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.pick-item.on {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.06);
+}
+
+.pick-item.on span::before {
+  content: '✓ ';
+  color: var(--primary);
+}
+
 .fade-enter-active,
 .fade-leave-active { transition: opacity 0.2s; }
 .fade-enter-from,
@@ -3060,8 +3172,22 @@ const genLabel = computed(() => {
     height: min(62vh, 600px);
   }
 
+  /* 狭い画面：右側は高さを固定せず内容に合わせ、「これまでの説明」は自分の中でスクロールする */
   .chat {
-    height: 520px;
+    height: auto;
+  }
+
+  .ed-history {
+    flex: none;
+  }
+
+  .ed-list {
+    flex: none;
+    max-height: 300px;
+  }
+
+  .ed-spacer {
+    display: none;
   }
 
   .top-right {
