@@ -303,7 +303,7 @@
             <textarea
               ref="composerInput"
               v-model="inputText"
-              rows="2"
+              rows="3"
               :disabled="loading"
               :placeholder="t(imageHistory.length && !restartPending ? 'placeholderEdit' : 'placeholderNew')"
               @keydown.enter.exact.prevent="sendMessage"
@@ -903,7 +903,7 @@ async function resumeSession() {
         {
           id: `a${item.version}`,
           role: 'assistant',
-          key: item.action === 'edit' ? 'edited' : 'generated',
+          key: item.action === 'generate' ? 'generated' : 'edited',
           params: { v: item.version }
         }
       )
@@ -938,6 +938,7 @@ async function resumeSession() {
         })
       }
     }
+    if (baseVersion.value && !restartPending.value) inputText.value = promptOf(baseVersion.value)
     finalVersion.value = data.final_version || 0
     participantId.value = data.participant_id
     startTimer(data.elapsed_sec)
@@ -969,11 +970,12 @@ async function sendMessage() {
 
   try {
     const data = await callApi('/api/generate', { message: text })
+    inputText.value = text // 次はこの文を書き換えて送る
 
     messages.value.push({
       id: Date.now() + 1,
       role: 'assistant',
-      key: data.action === 'edit' ? 'edited' : 'generated',
+      key: data.action === 'generate' ? 'generated' : 'edited',
       params: { v: data.version }
     })
 
@@ -991,6 +993,7 @@ async function sendMessage() {
     })
     restartPending.value = false
   } catch (error) {
+    if (!inputText.value) inputText.value = text
     messages.value.push({
       id: Date.now() + 1,
       role: 'assistant',
@@ -1016,6 +1019,7 @@ async function restartDesign() {
   try {
     await callApi('/api/restart')
     restartPending.value = true
+    inputText.value = ''
     messages.value.push({ id: Date.now(), role: 'assistant', key: 'restartMsg' })
     scrollToBottom()
     focusInput()
@@ -1029,6 +1033,7 @@ async function cancelRestart() {
     const data = await callApi('/api/restart', { cancel: true })
     restartPending.value = false
     baseVersion.value = data.base_version || latestVersion.value
+    inputText.value = promptOf(baseVersion.value)
     messages.value.push({
       id: Date.now(),
       role: 'assistant',
@@ -1049,6 +1054,7 @@ async function setBase() {
   try {
     await callApi('/api/base', { version })
     baseVersion.value = version
+    inputText.value = promptOf(version)
     messages.value.push({
       id: Date.now(),
       role: 'assistant',
@@ -1060,6 +1066,11 @@ async function setBase() {
   } catch (error) {
     await askDialog({ message: errorText(error) })
   }
+}
+
+// その版を作った全文（入力欄に戻すため）
+function promptOf(version) {
+  return imageHistory.value.find((h) => h.version === version)?.message || ''
 }
 
 function viewHistory(item) {
@@ -1108,7 +1119,17 @@ function newSurvey() {
   return { q1: 0, q2: 0, qc: 0, q3: 0, q4: [], q4_other: '', q5: [], q5_other: '', q6: [], q6_other: '', q7: '' }
 }
 const survey = ref(newSurvey())
-const S = computed(() => SURVEY[lang.value] || SURVEY.ja)
+// 「特になし」は他の難しさと同時に選べない：新しく押した方を残す
+watch(
+  () => survey.value.q5.slice(),
+  (now, before) => {
+    if (!now.includes('none') || now.length < 2) return
+    const justNone = !(before || []).includes('none')
+    survey.value.q5 = justNone ? ['none'] : now.filter((c) => c !== 'none')
+    if (justNone) survey.value.q5_other = ''
+  },
+)
+const S =computed(() => SURVEY[lang.value] || SURVEY.ja)
 // 1〜3 は選んだか、4〜6 は1つ以上選んだか（7 は任意）
 // 画面に出す番号（紙と同じ）。質問1・2は開始時に画面で回答済み
 const NUM = { qc: 3, q3: 4, q4: 5, q5: 6, q6: 7, q7: 8 }

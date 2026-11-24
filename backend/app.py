@@ -30,7 +30,10 @@ WORKFLOW_DIR = os.path.join(BASE_DIR, "workflows")
 # 本地模型：Qwen Image 2.1 官方 Turbo（qwen_image_2.1_turbo_int8_convrot），8 步，Euler，CFG 1.0，
 # 官方固定噪声表，文本编码器 qwen3vl_8b_int8_convrot。
 # workflows/*.json 由 tools/build_workflows.py 从 ComfyUI 自带的官方 Turbo 模板生成，不要手动修改；
-# 与官方唯一的不同是文生图画布 1024x1536（竖图 2:3，约 157 万像素）。修改时沿用参考图尺寸。
+# 与官方唯一的不同是文生图画布 1024x1536（竖图 2:3，约 157 万像素）。
+# 修改方式（v1.2〜）：不用编辑模型。输入栏保留上一次的全文，参加者改写全文后，
+# 用"基准版本的同一个种子"重新文生图 → 构图大致保留，写进文字的变化（发型、年龄感、去掉眼镜等）都能体现。
+# 全文与基准版本完全相同（原样再发送）时换新种子，相当于"换一个方案"。
 
 # 图片和日志（都不提交到仓库，见 .gitignore）
 IMAGE_DIR = os.path.join(BASE_DIR, "generated_images")
@@ -39,7 +42,7 @@ LOG_DIR = os.path.join(BASE_DIR, "logs")
 GENERATION_LOG = os.path.join(LOG_DIR, "generation_log.csv")
 GENERATION_HEADERS = [
     "timestamp", "participant_id", "version", "action", "base_version",
-    "prompt", "input_language", "duration_sec", "image_file", "error",
+    "prompt", "input_language", "duration_sec", "image_file", "error", "seed",
 ]
 EVENT_LOG = os.path.join(LOG_DIR, "event_log.csv")
 EVENT_HEADERS = ["timestamp", "participant_id", "event", "version", "detail"]
@@ -97,27 +100,22 @@ def run_comfy(workflow):
     raise TimeoutError("ComfyUI 生成超时")
 
 
-def comfy_text_to_image(prompt):
+def new_seed():
+    return random.randint(0, 2**31 - 1)
+
+
+def comfy_text_to_image(prompt, seed):
     wf = load_workflow("text_to_image_api.json")
-    wf["encode"]["inputs"]["prompt"] = prompt
-    wf["noise"]["inputs"]["noise_seed"] = random.randint(0, 2**31 - 1)
+    wf["encode"]["inputs"]["prompt"] = prompt  # 参加者的原文，不加任何修饰
+    wf["noise"]["inputs"]["noise_seed"] = seed
     return run_comfy(wf)
 
 
-def comfy_edit_image(prompt, image_path):
-    # 先把上一张图上传到 ComfyUI 的 input 目录
-    with open(image_path, "rb") as f:
-        up = requests.post(f"{COMFY_URL}/upload/image",
-                           files={"image": (os.path.basename(image_path), f, "image/png")},
-                           data={"overwrite": "true"}, timeout=60)
-    up.raise_for_status()
-    wf = load_workflow("reference_edit_api.json")
-    wf["load_image"]["inputs"]["image"] = up.json()["name"]
-    # 原生编辑：只传参加者的原话，不额外加"保持不变"之类的限制，
-    # 这样观察到的"改得动/改不动"就是模型本身的表现（参考图通过工作流里的图像输入传入）
-    wf["encode"]["inputs"]["prompt"] = prompt
-    wf["noise"]["inputs"]["noise_seed"] = random.randint(0, 2**31 - 1)
-    return run_comfy(wf)
+def version_record(participant_id, version):
+    """生成日志里某一版的记录（全文和种子）；找不到返回 None"""
+    rows = [r for r in read_csv(GENERATION_LOG)
+            if r.get("participant_id") == participant_id and r.get("version") == str(version)]
+    return rows[-1] if rows else None
 
 
 def detect_language(text):
@@ -244,6 +242,16 @@ def append_csv_row(file_path, headers, row):
     """如果 CSV 不存在则写入表头，然后追加一行；每次立即落盘"""
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     file_exists = os.path.exists(file_path)
+    if file_exists:
+        # 表头增加了新列（例：seed）时，把旧文件升级为新表头（旧行的新列留空，不丢数据）
+        with open(file_path, encoding="utf-8-sig", newline="") as f:
+            old_rows = list(csv.DictReader(f))
+            old_headers = list(old_rows[0].keys()) if old_rows else None
+        if old_headers is not None and old_headers != headers and set(old_headers) <= set(headers):
+            with open(file_path, "w", newline="", encoding="utf-8-sig") as f:
+                writer = csv.DictWriter(f, fieldnames=headers)
+                writer.writeheader()
+                writer.writerows(old_rows)
 
     with open(file_path, "a", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=headers)
@@ -365,16 +373,16 @@ def generate_character():
         started = time.time()
         error = ""
         image_file = ""
+        # 改写：沿用基准版本的种子（构图保持）；全文没变或旧数据没有种子时换新种子
+        base = version_record(participant_id, base_version) if is_edit else None
+        if base and base.get("seed") and base.get("prompt", "").strip() != message:
+            seed = int(base["seed"])
+        else:
+            seed = new_seed()
 
         try:
-            if is_edit:
-                # 第二次以后：基于最新一张图，根据用户输入修改
-                image_bytes = comfy_edit_image(message, state["latest_image_path"])
-                reply = "修正しました。"
-            else:
-                # 第一次：根据用户输入直接生成
-                image_bytes = comfy_text_to_image(message)
-                reply = "生成しました。"
+            image_bytes = comfy_text_to_image(message, seed)
+            reply = "修正しました。" if is_edit else "生成しました。"
 
             path = save_image_bytes(image_bytes, participant_id, version)
             image_file = os.path.relpath(path, BASE_DIR)
@@ -382,7 +390,7 @@ def generate_character():
             state["version"] = version
             image_url = "data:image/png;base64," + base64.b64encode(image_bytes).decode()
             response = jsonify({"reply": reply, "image": image_url, "version": version,
-                                "action": "edit" if is_edit else "generate"})
+                                "action": "rewrite" if is_edit else "generate"})
         except Exception as e:
             print("ERROR:", e)
             error = f"{type(e).__name__}: {e}"  # 日志里保留技术细节
@@ -393,13 +401,14 @@ def generate_character():
                 "timestamp": datetime.now().isoformat(timespec="seconds"),
                 "participant_id": participant_id,
                 "version": version if not error else "",
-                "action": "edit" if is_edit else "generate",
+                "action": "rewrite" if is_edit else "generate",
                 "base_version": base_version,
                 "prompt": message,
                 "input_language": detect_language(message),
                 "duration_sec": round(time.time() - started, 2),
                 "image_file": image_file,
                 "error": error,
+                "seed": seed,
             })
 
     return response
@@ -550,6 +559,8 @@ def submit_survey():
     def choices(key, limit=None):
         picked = [c for c in answers.get(key) or [] if c in SURVEY_CHOICES[key]]
         picked = list(dict.fromkeys(picked))  # 重複を除く（順序は保つ）
+        if "none" in picked and len(picked) > 1:  # 「特になし」と他は両立しない
+            picked.remove("none")
         return ";".join(picked[:limit] if limit else picked)
 
     def text(key):
@@ -591,7 +602,7 @@ def reset_character():
 def warm_up():
     """启动后先生成一张丢弃的图，让模型提前载入显存，第一位参加者不用等加载"""
     try:
-        comfy_text_to_image("a simple blue circle icon")
+        comfy_text_to_image("a simple blue circle icon", 1)
         print("WARMUP: done")
     except Exception as e:
         print("WARMUP failed (ignored):", e)
