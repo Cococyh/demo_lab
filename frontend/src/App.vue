@@ -269,51 +269,66 @@
           </div>
         </section>
 
-        <!-- チャット -->
-        <section class="chat">
-          <div ref="chatBody" class="chat-body">
-            <div
-              v-for="message in messages"
-              :key="message.id"
-              class="msg"
-              :class="message.role"
-            >
-              <p>{{ messageText(message) }}</p>
-            </div>
-
-            <div v-if="loading" class="msg assistant typing">
-              <span class="dots"><i></i><i></i><i></i></span>
-            </div>
+        <!-- 説明エディタ：画像は毎回この全文から作られる（チャットではない） -->
+        <section class="chat editor">
+          <div class="ed-head">
+            <h3>{{ t('descTitle') }}</h3>
+            <p>{{ t('descNote') }}</p>
           </div>
+
+          <p v-if="notice" class="ed-notice" :class="{ error: notice.error }">{{ notice.text }}</p>
 
           <div v-if="restartPending && !loading" class="restart-bar">
             <span>{{ t('restartBar') }}</span>
             <button type="button" class="link-btn" @click="cancelRestart">{{ t('restartCancel') }}</button>
           </div>
-          <div v-else-if="imageHistory.length && !loading" class="restart-row">
-            <button type="button" class="link-btn" @click="restartDesign">
-              <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
-                <path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-              {{ t('restartBtn') }}
-            </button>
-          </div>
 
-          <form class="composer" @submit.prevent="sendMessage">
+          <form class="ed-form" @submit.prevent="sendMessage">
             <textarea
               ref="composerInput"
               v-model="inputText"
-              rows="3"
+              rows="6"
               :disabled="loading"
               :placeholder="t(imageHistory.length && !restartPending ? 'placeholderEdit' : 'placeholderNew')"
-              @keydown.enter.exact.prevent="sendMessage"
+              @keydown.enter.ctrl.prevent="sendMessage"
+              @keydown.enter.meta.prevent="sendMessage"
             ></textarea>
-            <button type="submit" class="send" :disabled="loading || !inputText.trim()" :aria-label="t('send')">
-              <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-                <path d="M3 11.5l17-8-6.5 17-3-7-7.5-2z" fill="currentColor" />
-              </svg>
-            </button>
+            <div class="ed-actions">
+              <button
+                v-if="imageHistory.length && !loading && !restartPending"
+                type="button"
+                class="link-btn"
+                @click="restartDesign"
+              >
+                <svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true">
+                  <path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v4.5h4.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                {{ t('restartBtn') }}
+              </button>
+              <span v-else></span>
+              <button type="submit" class="gen-btn" :disabled="loading || !inputText.trim()">
+                {{ t(genLabel) }}
+              </button>
+            </div>
           </form>
+
+          <div v-if="imageHistory.length" class="ed-history">
+            <h4>{{ t('historyTitle') }}</h4>
+            <div ref="chatBody" class="ed-list">
+              <button
+                v-for="item in historyDesc"
+                :key="item.id"
+                type="button"
+                class="ed-item"
+                :class="{ active: item.version === displayVersion, base: item.version === baseVersion && !restartPending }"
+                @click="viewHistory(item)"
+              >
+                <b>Ver. {{ item.version }}<i v-if="item.version === finalVersion">★</i></b>
+                <span>{{ item.message }}</span>
+              </button>
+            </div>
+          </div>
+          <div v-else class="ed-spacer"></div>
 
           <button type="button" class="finish" @click="finishSession">
             {{ t('finish') }}
@@ -1262,13 +1277,27 @@ watch(
   }
 )
 
+// 説明の履歴は新しい順に上から並ぶので、更新されたら先頭へ戻す
 async function scrollToBottom() {
   await nextTick()
 
   if (chatBody.value) {
-    chatBody.value.scrollTo({ top: chatBody.value.scrollHeight, behavior: 'smooth' })
+    chatBody.value.scrollTo({ top: 0, behavior: 'smooth' })
   }
 }
+
+// 履歴（新しい順）と、説明欄の上に出す最新のお知らせ（できました・エラー・作り直しなど）
+const historyDesc = computed(() => [...imageHistory.value].reverse())
+const notice = computed(() => {
+  const last = [...messages.value].reverse().find((m) => m.role === 'assistant')
+  if (!last) return null
+  return { text: messageText(last), error: !!last.key?.startsWith('err.') || (!last.key && !!last.content) }
+})
+// 作るボタンの文言：最初／書き換えた／同じ文のまま（別の案）
+const genLabel = computed(() => {
+  if (!imageHistory.value.length || restartPending.value) return 'genFirst'
+  return inputText.value.trim() === promptOf(baseVersion.value).trim() ? 'genSame' : 'genRewrite'
+})
 </script>
 
 <style scoped>
@@ -2322,6 +2351,167 @@ async function scrollToBottom() {
 
 .send:hover:not(:disabled) { background: var(--primary-hover); }
 .send:disabled { opacity: 0.25; cursor: not-allowed; }
+
+/* ===== 説明エディタ（右側） ===== */
+.ed-head h3 {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.ed-head p {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.ed-notice {
+  margin: 0;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  color: var(--ink);
+  background: var(--soft);
+  border-radius: 12px;
+}
+
+.ed-notice.error {
+  color: var(--danger);
+  background: #fdecea;
+}
+
+.ed-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.ed-form textarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 150px;
+  padding: 14px 16px;
+  font: inherit;
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--ink);
+  background: #fff;
+  border: 1.5px solid #dcd9ce;
+  border-radius: 14px;
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.ed-form textarea::placeholder { color: var(--faint); }
+
+.ed-form textarea:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--primary-soft);
+}
+
+.ed-form textarea:disabled { background: #fafafa; }
+
+.ed-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ed-actions .link-btn { white-space: nowrap; }
+
+.gen-btn {
+  white-space: nowrap;
+  padding: 11px 20px;
+  font: inherit;
+  font-size: 15px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--primary);
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.gen-btn:hover:not(:disabled) { background: var(--primary-hover); }
+.gen-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.ed-history {
+  flex: 1 1 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+}
+
+.ed-history h4 {
+  margin: 8px 0 0;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.ed-list {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 4px;
+  scrollbar-width: thin;
+  scrollbar-color: #dcd9ce transparent;
+}
+
+.ed-item {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  width: 100%;
+  padding: 8px 12px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.ed-item:hover { border-color: #cfcabd; }
+.ed-item.active { border-color: var(--accent); background: var(--primary-soft); }
+
+.ed-item b {
+  flex: none;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.ed-item b i {
+  margin-left: 2px;
+  font-style: normal;
+  color: var(--primary);
+}
+
+.ed-item span {
+  font-size: 13px;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.ed-spacer { flex: 1 1 0; }
 
 .finish {
   align-self: center;
