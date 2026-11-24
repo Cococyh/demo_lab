@@ -801,11 +801,25 @@ function stopTimer() {
     clearInterval(timerId)
     timerId = null
   }
+  if (pingId) {
+    clearInterval(pingId)
+    pingId = null
+  }
+}
+
+// 参加中は 30 秒ごとに「まだいます」と後端に知らせる（その間、ほかの ID は開始できない）
+let pingId = null
+function startPing() {
+  if (pingId) clearInterval(pingId)
+  pingId = setInterval(() => {
+    if (participantId.value) postJson('/api/ping').catch(() => {})
+  }, 30000)
 }
 
 // elapsedSeconds：再開時にすでに経過している秒数（警告・時間切れは記録済みなので再送しない）
 function startTimer(elapsedSeconds = 0) {
   stopTimer()
+  startPing()
   sessionStartedAt = Date.now() - elapsedSeconds * 1000
   remainingSeconds.value = TIME_LIMIT_SECONDS - elapsedSeconds
   timeNotice.value = ''
@@ -860,9 +874,20 @@ function resetLocalState() {
 const startStep = ref('id')
 const q1Answer = ref(0)
 const p2Answer = ref(0) // 質問2：今のイメージの決まり具合
-function toQ1() {
-  if (!idInput.value.trim()) return
+async function toQ1() {
+  const id = idInput.value.trim()
+  if (!id) return
   startError.value = null
+  // ほかの人が参加中なら、質問に進む前に知らせる（確認できなくても進める。最終的には「はじめる」で後端が判定）
+  try {
+    const data = await callApi('/api/busy', { participant_id: id })
+    if (data.used || data.busy) {
+      startError.value = { prefix: '', error: apiError(data.used ? 'ID_USED' : 'BUSY') }
+      return
+    }
+  } catch (error) {
+    /* 確認できないときはそのまま進む */
+  }
   startStep.value = 'q1'
 }
 
@@ -903,7 +928,9 @@ async function resumeSession() {
   try {
     const data = await callApi('/api/resume', { participant_id: id })
     if (!data.active) {
-      rememberSession('')
+      // ほかの人が参加中のときは、自分の続きの記録は消さずに知らせるだけ
+      if (data.busy) startError.value = { prefix: '', error: apiError('BUSY') }
+      else rememberSession('')
       return
     }
 

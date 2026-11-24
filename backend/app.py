@@ -63,7 +63,29 @@ SURVEY_CHOICES = {
 }
 
 # 单台设备、一次一人：当前参加者的状态（开始新参加者时清空）
-state = {"participant_id": None, "version": 0, "latest_image_path": None}
+state = {"participant_id": None, "version": 0, "latest_image_path": None, "last_active": 0.0}
+# 有人正在参加时，别的 ID 不能开始（也不能把会话切走）。前端每 30 秒发一次 /api/ping；
+# 超过这个秒数没有任何请求，就当作那个人已经离开（关掉了页面却没按"终了"）
+BUSY_TIMEOUT = int(os.getenv("BUSY_TIMEOUT", "180"))
+
+
+def id_already_used(participant_id):
+    """这个 ID 是否已经被用过（正式日志、图片文件夹、预测试 logs/pilot 都算）。
+    900〜999 是测试用 ID，总是可以重复使用（测完会删除）"""
+    if not participant_id or (participant_id.isdigit() and 900 <= int(participant_id) <= 999):
+        return False
+    if os.path.isdir(os.path.join(IMAGE_DIR, participant_id)):
+        return True
+    for log in (EVENT_LOG, os.path.join(LOG_DIR, "pilot", "event_log.csv")):
+        if any(r.get("participant_id") == participant_id and r.get("event") == "start" for r in read_csv(log)):
+            return True
+    return os.path.isdir(os.path.join(LOG_DIR, "pilot", "generated_images", participant_id))
+
+
+def someone_else_active(participant_id):
+    """当前有别的参加者正在进行（最近有请求）时返回 True。调用方需持有 state_lock"""
+    current = state["participant_id"]
+    return bool(current) and current != participant_id and time.time() - state["last_active"] < BUSY_TIMEOUT
 state_lock = threading.Lock()
 
 
@@ -149,11 +171,13 @@ MSG_COMFY_DOWN = "画像生成エンジンに接続できません。実験者�
 MSG_TIMEOUT = "時間がかかりすぎたため中断しました。もう一度送信してください。"
 MSG_GEN_FAILED = "画像を作れませんでした。もう一度送信してください。続く場合は実験者に知らせてください。"
 MSG_BAD_VERSION = "その画像は選べません。"
+MSG_BUSY = "現在、ほかの方が参加中です。終わるまで少しお待ちください。"
+MSG_ID_USED = "このIDはすでに使われています。別のIDを入力してください。"
 
 
 ERROR_CODES = {MSG_NO_ID: "NO_ID", MSG_BAD_ID: "BAD_ID", MSG_NO_SESSION: "NO_SESSION",
                MSG_NO_MESSAGE: "NO_MESSAGE", MSG_COMFY_DOWN: "COMFY_DOWN", MSG_TIMEOUT: "TIMEOUT",
-               MSG_GEN_FAILED: "GEN_FAILED", MSG_BAD_VERSION: "BAD_VERSION"}
+               MSG_GEN_FAILED: "GEN_FAILED", MSG_BAD_VERSION: "BAD_VERSION", MSG_BUSY: "BUSY", MSG_ID_USED: "ID_USED"}
 
 
 def error_json(msg):
@@ -300,14 +324,18 @@ def ensure_participant(data):
     if not participant_id:
         return state["participant_id"]
     if state["participant_id"] == participant_id:
+        state["last_active"] = time.time()
         return participant_id
+    if someone_else_active(participant_id):
+        return None  # 别人正在进行：不切走会话
 
     previous = state["participant_id"] or ""
     # 版本号接着所有已存图片的最大值往后编（不覆盖）；
     # 修改的基准只取"本次会话"生成的最新一张，不会误用同一 ID 上一次会话的图
     latest = max(existing_versions(participant_id), default=0)
     latest_path = session_base_path(participant_id)
-    state.update(participant_id=participant_id, version=latest, latest_image_path=latest_path)
+    state.update(participant_id=participant_id, version=latest, latest_image_path=latest_path,
+                 last_active=time.time())
     log_event("restore", version=latest or "", detail=f"previous={previous}")
     print(f"RESTORE: participant {participant_id} (latest version {latest}, previous state {previous or 'none'})")
     return participant_id
@@ -330,6 +358,16 @@ def health():
     return jsonify({"backend": True, "comfyui": comfy_ok})
 
 
+@app.route("/api/busy", methods=["POST"])
+def busy():
+    """开始页"下一步"时先确认：是否有别的参加者正在进行（不写日志）"""
+    data = request.get_json(silent=True) or {}
+    participant_id = safe_id(normalize_id(data.get("participant_id")))
+    with state_lock:
+        return jsonify({"busy": someone_else_active(participant_id),
+                        "used": id_already_used(participant_id)})
+
+
 @app.route("/api/start", methods=["POST"])
 def start_participant():
     """开始新的参加者：设置ID并清空上一个人的状态"""
@@ -344,10 +382,17 @@ def start_participant():
         return error_json(MSG_BAD_ID), 400
 
     with state_lock:
+        if id_already_used(participant_id):
+            print(f"ID USED: {participant_id} was already used, start refused")
+            return error_json(MSG_ID_USED), 409
+        if someone_else_active(participant_id):
+            print(f"BUSY: {participant_id} tried to start while {state['participant_id']} is active")
+            return error_json(MSG_BUSY), 409
         # 同一个 ID 再次开始时，版本号接着已有的最大值往后编，避免覆盖之前的图片；
         # 但下一句仍按"新生成"处理（不基于旧图修改）
         latest = max(existing_versions(participant_id), default=0)
-        state.update(participant_id=participant_id, version=latest, latest_image_path=None)
+        state.update(participant_id=participant_id, version=latest, latest_image_path=None,
+                     last_active=time.time())
         log_event("start", detail=f"numbering_continues_after=v{latest}" if latest else "")
 
     print(f"START: participant {participant_id} (existing versions up to {latest})")
@@ -488,6 +533,8 @@ def resume_session():
         session = current_session(participant_id)
         if session is None or session["finished"]:
             return jsonify({"active": False})
+        if someone_else_active(participant_id):
+            return jsonify({"active": False, "busy": True})
         ensure_participant(data)
         items = [
             {
@@ -521,6 +568,15 @@ def get_image(participant_id, version):
     participant_id = safe_id(participant_id)
     folder = os.path.join(IMAGE_DIR, participant_id)
     return send_from_directory(folder, f"{participant_id}_v{version}.png", max_age=0)
+
+
+@app.route("/api/ping", methods=["POST"])
+def ping():
+    """前端在进行中每 30 秒发一次：表示"这个人还在"（不写日志）"""
+    data = request.get_json(silent=True) or {}
+    with state_lock:
+        ok = ensure_participant(data)
+    return (jsonify({"message": "ok"}), 200) if ok else (error_json(MSG_BUSY), 409)
 
 
 @app.route("/api/event", methods=["POST"])
@@ -593,7 +649,7 @@ def reset_character():
     with state_lock:
         if state["participant_id"]:
             log_event("reset")
-        state.update(participant_id=None, version=0, latest_image_path=None)
+        state.update(participant_id=None, version=0, latest_image_path=None, last_active=0.0)
 
     print("RESET OK: participant state cleared")
     return jsonify({"message": "reset ok"})

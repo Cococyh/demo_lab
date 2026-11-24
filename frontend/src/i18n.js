@@ -85,7 +85,9 @@ export const MESSAGES = {
     'err.COMFY_DOWN': '画像生成エンジンに接続できません。実験者に知らせてください。',
     'err.TIMEOUT': '時間がかかりすぎたため中断しました。もう一度送信してください。',
     'err.GEN_FAILED': '画像を作れませんでした。もう一度送信してください。続く場合は実験者に知らせてください。',
-    'err.BAD_VERSION': 'その画像は選べません。'
+    'err.BAD_VERSION': 'その画像は選べません。',
+    'err.BUSY': '現在、ほかの方が参加中です。終わるまで少しお待ちください。',
+    'err.ID_USED': 'このIDはすでに使われています。別のIDを入力してください。'
   },
   zh: {
     'start.title': '你心目中\n可爱的女性角色',
@@ -165,7 +167,9 @@ export const MESSAGES = {
     'err.COMFY_DOWN': '无法连接图像生成引擎，请告知实验人员。',
     'err.TIMEOUT': '用时过长，已中断。请再发送一次。',
     'err.GEN_FAILED': '图片生成失败，请再发送一次。如果一直失败，请告知实验人员。',
-    'err.BAD_VERSION': '无法选择这张图片。'
+    'err.BAD_VERSION': '无法选择这张图片。',
+    'err.BUSY': '现在有其他人正在参与，请稍等对方结束后再开始。',
+    'err.ID_USED': '这个 ID 已经被使用过了，请输入其他 ID。'
   },
   en: {
     'start.title': 'Your idea of a\ncute female character',
@@ -247,6 +251,8 @@ export const MESSAGES = {
     'err.TIMEOUT': 'It took too long and was stopped. Please send it again.',
     'err.GEN_FAILED':
       'Could not create the image. Please send it again. If this keeps happening, tell the experimenter.',
-    'err.BAD_VERSION': 'That image cannot be chosen.'
+    'err.BAD_VERSION': 'That image cannot be chosen.',
+    'err.BUSY': 'Someone else is taking part right now. Please wait until they finish.',
+    'err.ID_USED': 'This ID has already been used. Please enter a different ID.'
   }
 }
