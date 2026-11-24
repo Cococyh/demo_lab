@@ -13,6 +13,7 @@ export const Q6_CODES = ['satisfied', 'gave_up', 'no_idea', 'tired', 'time_up', 
 export const SURVEY = {
   ja: {
     toggle: 'オンラインで参加した方は、こちらのアンケートにお答えください',
+    closeUnsent: 'アンケートがまだ送信されていません。閉じると、もう回答できません。閉じますか？',
     onsite: '会場で参加した方は、紙のアンケートにお答えください（ここは不要です）。',
     finalLabel: '最後に選んだ画像の番号',
     one: '（1つだけ）',
@@ -68,6 +69,7 @@ export const SURVEY = {
   },
   zh: {
     toggle: '线上参与的人，请在这里回答问卷',
+    closeUnsent: '问卷还没有提交。关闭后就不能再回答了，确定要关闭吗？',
     onsite: '在现场参与的人，请填写纸质问卷（这里不用填）。',
     finalLabel: '最后选择的图片编号',
     one: '（单选）',
@@ -123,6 +125,7 @@ export const SURVEY = {
   },
   en: {
     toggle: 'If you took part online, please answer the questionnaire here',
+    closeUnsent: 'The questionnaire has not been sent. If you close this, you cannot answer it any more. Close anyway?',
     onsite: 'If you took part on site, please use the paper questionnaire (no need to fill this in).',
     finalLabel: 'Number of the final image you chose',
     one: '(choose one)',

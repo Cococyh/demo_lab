@@ -329,7 +329,7 @@
           <p class="dialog-message">
             {{ thanks.final ? t('thanksFinal', { v: thanks.final }) : t('thanks') }}
           </p>
-          <p class="thanks-onsite">{{ t('thanksOnsite') }}</p>
+          <p v-if="!isOnline" class="thanks-onsite">{{ t('thanksOnsite') }}</p>
 
           <details class="survey" :open="surveyOpen" @toggle="surveyOpen = $event.target.open">
             <summary>{{ S.toggle }}</summary>
@@ -462,7 +462,7 @@
           </details>
 
           <div class="dialog-actions">
-            <button type="button" class="dialog-cancel" @click="closeThanks">{{ t('close') }}</button>
+            <button type="button" class="dialog-cancel" @click="requestCloseThanks">{{ t('close') }}</button>
           </div>
         </div>
       </div>
@@ -951,7 +951,21 @@ async function resumeSession() {
   }
 }
 
-onMounted(resumeSession)
+// アンケートだけの入口：?survey=ID&final=番号 で開くと、制作せずにその ID のアンケートを出す
+// （オンライン参加者が終了画面を閉じてしまい、アンケートに答えられなかったときの救済用）
+onMounted(() => {
+  const params = new URLSearchParams(location.search)
+  const pid = (params.get('survey') || '').trim()
+  if (/^[A-Za-z0-9_-]{1,40}$/.test(pid)) {
+    const lang = params.get('lang')
+    if (LANGS.some((l) => (l.code || l) === lang)) setLang(lang, { log: false })
+    const final = parseInt(params.get('final') || '0', 10)
+    thanks.value = { pid, final: final > 0 ? final : 0 }
+    surveyOpen.value = true
+    return
+  }
+  resumeSession()
+})
 
 async function sendMessage() {
   const text = inputText.value.trim()
@@ -1166,6 +1180,29 @@ async function submitSurvey() {
   }
 }
 
+// オンライン参加（トンネル経由：127.0.0.1 / localhost 以外で開いている）かどうか。
+// オンラインの人は終了後にアンケートを最初から開き、「現場の人は紙に…」の文は出さない。
+// 動作確認用に ?online=1 でもオンライン扱いにできる
+const isOnline =
+  !['localhost', '127.0.0.1', '[::1]'].includes(location.hostname) ||
+  new URLSearchParams(location.search).get('online') === '1'
+
+// オンラインでアンケート未送信のまま閉じようとしたら、一度確認する
+async function requestCloseThanks() {
+  if (isOnline && surveyState.value !== 'sent') {
+    const ok = await askDialog({
+      message: S.value.closeUnsent,
+      okText: t('close'),
+      cancelText: t('back')
+    })
+    if (!ok) {
+      surveyOpen.value = true
+      return
+    }
+  }
+  closeThanks()
+}
+
 // お礼を閉じたら、次の人のために日本語の画面に戻す
 function closeThanks() {
   thanks.value = null
@@ -1209,6 +1246,7 @@ async function finishSession() {
   idInput.value = ''
   // お礼（参加者が使っていた言語で）。閉じると closeThanks() で日本語に戻る
   thanks.value = { pid, final: chosen }
+  if (isOnline) surveyOpen.value = true
 }
 
 // 履歴が増えたら、いちばん新しいサムネイルが見える位置まで送る
