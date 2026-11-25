@@ -356,6 +356,19 @@
                 {{ S.finalLabel }}<b>Ver. {{ thanks.final }}</b>
               </p>
 
+              <!-- ID なしのアンケート用リンク（?survey）：参加者が自分で ID を入れる -->
+              <section v-if="thanks.manual" class="q survey-id" :class="{ missing: idMissing }">
+                <h4>{{ S.idLabel }}<i class="req">{{ S.req }}</i></h4>
+                <p class="survey-id-hint">{{ S.idHint }}</p>
+                <input v-model="manualId" type="text" maxlength="32" autocomplete="off" />
+                <h4 class="survey-id-final">{{ S.finalInput }}</h4>
+                <div class="survey-id-ver">
+                  Ver.
+                  <input v-model="manualFinal" type="number" min="1" max="99" inputmode="numeric" />
+                </div>
+                <p v-if="idMissing" class="survey-error">{{ S.idMissing }}</p>
+              </section>
+
               <!-- 2・3：紙と同じく5段階を横に並べる -->
               <section
                 v-for="q in ['qc', 'q3']"
@@ -1031,11 +1044,13 @@ async function resumeSession() {
 onMounted(() => {
   const params = new URLSearchParams(location.search)
   const pid = (params.get('survey') || '').trim()
-  if (/^[A-Za-z0-9_-]{1,40}$/.test(pid)) {
+  // ?survey だけ（ID なし）なら、みんなに同じリンクを送って ID は本人に入れてもらう
+  const manual = params.has('survey') && (pid === '' || pid === 'id')
+  if (manual || /^[A-Za-z0-9_-]{1,40}$/.test(pid)) {
     const lang = params.get('lang')
     if (LANGS.some((l) => (l.code || l) === lang)) setLang(lang, { log: false })
     const final = parseInt(params.get('final') || '0', 10)
-    thanks.value = { pid, final: final > 0 ? final : 0 }
+    thanks.value = manual ? { pid: '', final: 0, manual: true } : { pid, final: final > 0 ? final : 0 }
     surveyOpen.value = true
     return
   }
@@ -1208,6 +1223,9 @@ function newSurvey() {
   return { q1: 0, qc: 0, q3: 0, q4: [], q4_other: '', q5: [], q5_other: '', q6: [], q6_other: '', q7: '' }
 }
 const survey = ref(newSurvey())
+const manualId = ref('') // ID なしのアンケート用リンクで、本人が入れる ID
+const manualFinal = ref('')
+const idMissing = ref(false)
 // 「特になし」は他の難しさと同時に選べない：新しく押した方を残す
 watch(
   () => survey.value.q5.slice(),
@@ -1233,6 +1251,20 @@ const showMissing = ref(false) // 送信を押したのに 1〜3 が未回答の
 
 async function submitSurvey() {
   if (!thanks.value) return
+  let pid = thanks.value.pid
+  let final = thanks.value.final || 0
+  if (thanks.value.manual) {
+    // 全角で打っても通るように半角へ（後端でも同じ処理をする）
+    pid = manualId.value.normalize('NFKC').trim()
+    idMissing.value = !/^[A-Za-z0-9_-]{1,32}$/.test(pid)
+    if (idMissing.value) {
+      await nextTick()
+      document.querySelector('.survey-id')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return
+    }
+    const n = parseInt(String(manualFinal.value).normalize('NFKC'), 10)
+    final = n > 0 ? n : 0
+  }
   if (!surveyReady.value) {
     showMissing.value = true
     await nextTick()
@@ -1243,8 +1275,8 @@ async function submitSurvey() {
   surveyState.value = 'sending'
   try {
     await callApi('/api/survey', {
-      participant_id: thanks.value.pid,
-      final_version: thanks.value.final || 0,
+      participant_id: pid,
+      final_version: final,
       lang: lang.value,
       answers: survey.value
     })
@@ -1284,6 +1316,9 @@ function closeThanks() {
   surveyOpen.value = false
   showMissing.value = false
   survey.value = newSurvey()
+  manualId.value = ''
+  manualFinal.value = ''
+  idMissing.value = false
   surveyState.value = 'idle'
   surveyError.value = ''
   setLang('ja', { log: false })
@@ -2805,6 +2840,45 @@ const genLabel = computed(() => {
   gap: 10px;
   font-size: 14px;
   color: var(--muted);
+}
+
+.survey-id input {
+  width: 100%;
+  max-width: 260px;
+  height: 40px;
+  padding: 0 12px;
+  font: inherit;
+  font-size: 16px;
+  border: 1px solid #dcd9ce;
+  border-radius: 10px;
+}
+
+.survey .survey-id h4 {
+  padding-left: 0;
+  margin-bottom: 6px;
+}
+
+.survey-id-hint {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--muted, #6b6b6b);
+}
+
+.survey .survey-id-final,
+.survey .q.missing .survey-id-final {
+  margin-top: 16px;
+  color: inherit; /* 任意の項目なので、ID が未入力でも赤くしない */
+}
+
+.survey-id-ver {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.survey-id-ver input {
+  width: 90px;
 }
 
 .survey-final b {
