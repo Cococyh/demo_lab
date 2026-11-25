@@ -1057,6 +1057,16 @@ onMounted(() => {
   resumeSession()
 })
 
+function preloadImage(src) {
+  // 読み込みに失敗しても表示は続ける（<img> がもう一度取りに行く）
+  return new Promise((resolve) => {
+    const img = new Image()
+    img.onload = resolve
+    img.onerror = resolve
+    img.src = src
+  })
+}
+
 async function sendMessage() {
   const text = inputText.value.trim()
 
@@ -1074,6 +1084,9 @@ async function sendMessage() {
 
   try {
     const data = await callApi('/api/generate', { message: text })
+    // 画像はアドレスで返ってくるので、読み込み終わるまで「生成中」のまま待つ
+    data.image = `${API_BASE}${data.image}`
+    await preloadImage(data.image)
     inputText.value = text // 次はこの文を書き換えて送る
 
     messages.value.push({

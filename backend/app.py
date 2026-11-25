@@ -6,7 +6,6 @@ import re
 import json
 import time
 import uuid
-import base64
 import csv
 import random
 import threading
@@ -433,7 +432,8 @@ def generate_character():
             image_file = os.path.relpath(path, BASE_DIR)
             state["latest_image_path"] = path
             state["version"] = version
-            image_url = "data:image/png;base64," + base64.b64encode(image_bytes).decode()
+            # 只返回地址，浏览器再以二进制下载（比 base64 嵌进 JSON 少约 1/3 的数据量；2026-11-26 起）
+            image_url = f"/api/image/{participant_id}/{version}"
             response = jsonify({"reply": reply, "image": image_url, "version": version,
                                 "action": "rewrite" if is_edit else "generate"})
         except Exception as e:
